@@ -56,15 +56,17 @@ imshow(readimage(imds,Bulinid))
 subplot(1,3,3);
 imshow(readimage(imds,Lymnaea))
 
-% Load pre-trained VGG16 network
-net = vgg16()
+% Load pre-trained AlexNet
+net = alexnet()
 % View the CNN architecture
-layers = net.Layers
+net.Layers
 % Inspect the first layer
 net.Layers(1)
 % Inspect the last layer
 net.Layers(end)
 
+% Number of class names for ImageNet classification task
+numel(net.Layers(end).ClassNames)
 % Set the ImageDatastore ReadFcn
 imds.ReadFcn = @(filename)readAndPreprocessImage(filename);
  function Iout = readAndPreprocessImage(filename)
@@ -76,10 +78,9 @@ imds.ReadFcn = @(filename)readAndPreprocessImage(filename);
         if ismatrix(I)
             I = cat(3,I,I,I);
         end
-        
-        % Adjust size of the image 
-        sz = net.Layers(1).InputSize; 
-        Iout = I(1:sz(1),1:sz(2),1:sz(3));
+
+        % Resize the image as required for the CNN.
+        Iout = imresize(I, [227 227]);
 
         % Note that the aspect ratio is not preserved. In Caltech 101, the
         % object of interest is centered in the image and occupies a
@@ -88,34 +89,47 @@ imds.ReadFcn = @(filename)readAndPreprocessImage(filename);
         % beneficial to preserve the aspect ratio of the original image
         % when resizing.
  end
-[trainingSet, testSet] = splitEachLabel(imds, 0.3, 'randomize');
+[trainingSet, testSet] = splitEachLabel(imds, 0.8, 'randomize');
+% Get the network weights for the second convolutional layer
+w1 = net.Layers(2).Weights;
 
-layersTransfer = net.Layers(1:end-3);
-numClasses=(categories(trainingSet.Labels));
-layersTransfer(end+1) = fullyConnectedLayer(3);
-layersTransfer(end+1) = softmaxLayer();
-layersTransfer(end+1) = classificationLayer();
-optionsTransfer = trainingOptions('sgdm', ...
-    'MaxEpochs',5, ...
-    'InitialLearnRate',0.0001);
-netTransfer = trainNetwork(trainingSet,layersTransfer,optionsTransfer);
-YPred = classify(netTransfer,testSet);
-YTest = testDigitData.Labels;
+% Scale and resize the weights for visualization
+w1 = mat2gray(w1);
+w1 = imresize(w1,5);
 
-accuracy = sum(YPred==YTest)/numel(YTest)
+% Display a montage of network weights. There are 96 individual sets of
+% weights in the first layer.
+figure
+montage(w1)
+title('First convolutional layer weights')
+featureLayer = 'fc7';
+trainingFeatures = activations(net, trainingSet, featureLayer, ...
+    'MiniBatchSize', 32, 'OutputAs', 'columns');
+% Get training labels from the trainingSet
+trainingLabels = trainingSet.Labels;
 
-convnetTransfer = trainNetwork(XTrain,TTrain, ...
-		   layersTransfer,optionsTransfer);
+% Train multiclass SVM classifier using a fast linear solver, and set
+% 'ObservationsIn' to 'columns' to match the arrangement used for training
+% features.
+classifier = fitcecoc(trainingFeatures, trainingLabels, ...
+    'Learners', 'Linear', 'Coding', 'onevsall', 'ObservationsIn', 'columns');
+% Extract test features using the CNN
+testFeatures = activations(net, testSet, featureLayer, 'MiniBatchSize',32);
 
-% trainingFeatures = activations(net, trainingSet, featureLayer, ...
-%     'MiniBatchSize', 32, 'channels', 'columns');
-% % Get training labels from the trainingSet
-% trainingLabels = trainingSet.Labels;
+% Pass CNN image features to trained classifier
+predictedLabels = predict(classifier, testFeatures);
 
-%optionsTransfer = trainingOptions('sgdm', ...
- %   'MaxEpochs',5, ...
- %  'InitialLearnRate',0.0001);
+% Get the known labels
+testLabels = testSet.Labels;
 
+% Tabulate the results using a confusion matrix.
+confMat = confusionmat(testLabels, predictedLabels)
+
+% Convert confusion matrix into percentage form
+confMat = bsxfun(@rdivide,confMat,sum(confMat,2))
+
+% Display the mean accuracy
+mean(diag(confMat))
 
 %Now we will loop over the images to make predictions
 myDir = uigetdir('', 'Select the images to run predictions on'); %gets directory with images
@@ -128,8 +142,8 @@ for k = 1:length(myFiles)
     % Pre-process the images as required for the CNN
     img = readAndPreprocessImage(newImage);
     % Extract image features using the CNN
-    % imageFeatures = activations(net, img, featureLayer);
+    imageFeatures = activations(net, img, featureLayer);
     % Make a prediction using the classifier
-    label = classify(net, img)
+    label = predict(classifier, imageFeatures)
 end
 end

@@ -57,7 +57,7 @@ subplot(1,3,3);
 imshow(readimage(imds,Lymnaea))
 
 % Load pre-trained VGG16 network
-net = vgg16()
+net = vgg19()
 % View the CNN architecture
 layers = net.Layers
 % Inspect the first layer
