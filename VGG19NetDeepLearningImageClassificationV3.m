@@ -57,7 +57,7 @@ subplot(1,3,3);
 imshow(readimage(imds,Lymnaea))
 
 % Load pre-trained VGG16 network
-net = vgg19()
+net = vgg16()
 % View the CNN architecture
 layers = net.Layers
 % Inspect the first layer
@@ -88,11 +88,11 @@ imds.ReadFcn = @(filename)readAndPreprocessImage(filename);
         % beneficial to preserve the aspect ratio of the original image
         % when resizing.
  end
-[trainingSet, testSet] = splitEachLabel(imds, 0.3, 'randomize');
+[trainingSet, testSet] = splitEachLabel(imds, 0.2, 'randomize');
 
 layersTransfer = net.Layers(1:end-3);
 numClasses=(categories(trainingSet.Labels));
-layersTransfer(end+1) = fullyConnectedLayer(3);
+layersTransfer(end+1) = fullyConnectedLayer(3, 'WeightLearnRateFactor',50,'BiasLearnRateFactor',50);
 layersTransfer(end+1) = softmaxLayer();
 layersTransfer(end+1) = classificationLayer();
 optionsTransfer = trainingOptions('sgdm', ...
@@ -100,12 +100,10 @@ optionsTransfer = trainingOptions('sgdm', ...
     'InitialLearnRate',0.0001);
 netTransfer = trainNetwork(trainingSet,layersTransfer,optionsTransfer);
 YPred = classify(netTransfer,testSet);
-YTest = testDigitData.Labels;
+YTest = testSet.Labels;
 
 accuracy = sum(YPred==YTest)/numel(YTest)
 
-convnetTransfer = trainNetwork(XTrain,TTrain, ...
-		   layersTransfer,optionsTransfer);
 
 % trainingFeatures = activations(net, trainingSet, featureLayer, ...
 %     'MiniBatchSize', 32, 'channels', 'columns');

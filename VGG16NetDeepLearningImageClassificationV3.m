@@ -56,8 +56,17 @@ imshow(readimage(imds,Bulinid))
 subplot(1,3,3);
 imshow(readimage(imds,Lymnaea))
 
+net = vgg16();
 % Load pre-trained VGG16 network
-net = vgg16()
+% netData = load('convnet_checkpoint__39__2017_08_18__17_36_15.mat');
+% variablenames = fieldnames(netData);
+% for k = 1:numel(variablenames)
+%     net = netData.(variablenames{k});
+%     if isa(net, 'network')
+%         net = net;
+%         break;
+%     end
+% end
 % View the CNN architecture
 layers = net.Layers
 % Inspect the first layer
@@ -88,34 +97,50 @@ imds.ReadFcn = @(filename)readAndPreprocessImage(filename);
         % beneficial to preserve the aspect ratio of the original image
         % when resizing.
  end
-[trainingSet, testSet] = splitEachLabel(imds, 0.3, 'randomize');
+[trainingSet, testSet] = splitEachLabel(imds, 0.2, 'randomize');
 
 layersTransfer = net.Layers(1:end-3);
-numClasses=(categories(trainingSet.Labels));
-layersTransfer(end+1) = fullyConnectedLayer(3);
+categories(trainingSet.Labels)
+numClasses=numel(unique(categories(trainingSet.Labels)))
+layersTransfer(end+1) = fullyConnectedLayer(numClasses, 'WeightLearnRateFactor',20,'BiasLearnRateFactor',20);
 layersTransfer(end+1) = softmaxLayer();
 layersTransfer(end+1) = classificationLayer();
+function stop = stopTrainingAtThreshold(info,thr)
+
+    stop = false;
+    if info.State ~= "iteration"
+        return
+    end
+
+    persistent iterationAccuracy
+
+    % Append accuracy for this iteration
+    iterationAccuracy = [iterationAccuracy info.TrainingAccuracy];
+
+    % Evaluate mean of iteration accuracy and remove oldest entry
+    if numel(iterationAccuracy) == 50
+        stop = mean(iterationAccuracy) > thr;
+
+        iterationAccuracy(1) = [];
+    end
+
+end
+
+functions = { ...
+    @(info) stopTrainingAtThreshold(info,95)};
 optionsTransfer = trainingOptions('sgdm', ...
-    'MaxEpochs',5, ...
-    'InitialLearnRate',0.0001);
+    'MaxEpochs', 50, ...
+    'InitialLearnRate',0.001,...
+    'MiniBatchSize',32, ...
+    'CheckpointPath', 'C:\Users\DeLeo\Documents\MATLAB', ...
+    'OutputFcn',functions);
 netTransfer = trainNetwork(trainingSet,layersTransfer,optionsTransfer);
-YPred = classify(netTransfer,testSet);
-YTest = testDigitData.Labels;
+YPred = classify(net,testSet);
+YTest = testSet.Labels;
 
 accuracy = sum(YPred==YTest)/numel(YTest)
-
-convnetTransfer = trainNetwork(XTrain,TTrain, ...
-		   layersTransfer,optionsTransfer);
-
-% trainingFeatures = activations(net, trainingSet, featureLayer, ...
-%     'MiniBatchSize', 32, 'channels', 'columns');
-% % Get training labels from the trainingSet
-% trainingLabels = trainingSet.Labels;
-
-%optionsTransfer = trainingOptions('sgdm', ...
- %   'MaxEpochs',5, ...
- %  'InitialLearnRate',0.0001);
-
+finalVGGNet = net;
+save finalVGGNet;
 
 %Now we will loop over the images to make predictions
 myDir = uigetdir('', 'Select the images to run predictions on'); %gets directory with images
